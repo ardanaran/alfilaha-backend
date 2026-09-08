@@ -329,7 +329,9 @@ db.connect((err) => {
       gambar VARCHAR(255),
       usia VARCHAR(100),
       jadwal_siram VARCHAR(100),
-      penanggung_jawab VARCHAR(100),
+      jadwal_pupuk VARCHAR(100),
+      jadwal_panen VARCHAR(100),
+      penanggung_jawab VARCHAR(255),
       kebutuhan_air VARCHAR(100),
       terakhir_dipupuk VARCHAR(100),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -344,12 +346,17 @@ db.connect((err) => {
         ALTER TABLE tanaman 
         ADD COLUMN IF NOT EXISTS usia VARCHAR(100),
         ADD COLUMN IF NOT EXISTS jadwal_siram VARCHAR(100),
+        ADD COLUMN IF NOT EXISTS jadwal_pupuk VARCHAR(100),
+        ADD COLUMN IF NOT EXISTS jadwal_panen VARCHAR(100),
         ADD COLUMN IF NOT EXISTS penanggung_jawab VARCHAR(100),
         ADD COLUMN IF NOT EXISTS kebutuhan_air VARCHAR(100),
         ADD COLUMN IF NOT EXISTS terakhir_dipupuk VARCHAR(100);
       `;
       db.query(addCols, (e) => {
         if(e && e.code !== 'ER_DUP_FIELDNAME') console.log("Info kolom tanaman: ", e.message);
+      });
+      db.query("ALTER TABLE tanaman MODIFY COLUMN penanggung_jawab VARCHAR(255)", (e) => {
+        if(e) console.log("Info update panjang penanggung_jawab: ", e.message);
       });
     }
   });
@@ -359,7 +366,7 @@ db.connect((err) => {
       id INT AUTO_INCREMENT PRIMARY KEY,
       tanaman_id INT NOT NULL,
       santri_id INT NOT NULL,
-      jenis_tindakan ENUM('siram', 'pupuk') NOT NULL,
+      jenis_tindakan ENUM('siram', 'pupuk', 'panen') NOT NULL,
       waktu_tindakan TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (tanaman_id) REFERENCES tanaman(id) ON DELETE CASCADE,
       FOREIGN KEY (santri_id) REFERENCES pendaftar_santri(id) ON DELETE CASCADE
@@ -367,7 +374,12 @@ db.connect((err) => {
   `;
   db.query(createLogPerawatanQuery, (err) => {
     if (err) console.error("❌ Gagal membuat tabel log_perawatan:", err);
-    else console.log("✅ Tabel 'log_perawatan' siap digunakan.");
+    else {
+      console.log("✅ Tabel 'log_perawatan' siap digunakan.");
+      db.query("ALTER TABLE log_perawatan MODIFY COLUMN jenis_tindakan ENUM('siram', 'pupuk', 'panen') NOT NULL", (e) => {
+        if (e) console.log("Info kolom log_perawatan: ", e.message);
+      });
+    }
   });
   const createFotoPerkembanganQuery = `
     CREATE TABLE IF NOT EXISTS foto_perkembangan (
@@ -383,6 +395,41 @@ db.connect((err) => {
   db.query(createFotoPerkembanganQuery, (err) => {
     if (err) console.error("❌ Gagal membuat tabel foto_perkembangan:", err);
     else console.log("✅ Tabel 'foto_perkembangan' siap digunakan.");
+  });
+
+  // Auto-create tabel users
+  const createUsersQuery = `
+    CREATE TABLE IF NOT EXISTS users (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      nama_lengkap VARCHAR(255) NOT NULL,
+      username VARCHAR(100) UNIQUE NOT NULL,
+      password VARCHAR(255) NOT NULL,
+      role ENUM('santri', 'guru', 'petugas') NOT NULL,
+      status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `;
+  db.query(createUsersQuery, (err) => {
+    if (err) console.error("❌ Gagal membuat tabel users:", err);
+    else console.log("✅ Tabel 'users' siap digunakan.");
+  });
+
+  // Auto-create tabel riwayat_perawatan
+  const createRiwayatPerawatanQuery = `
+    CREATE TABLE IF NOT EXISTS riwayat_perawatan (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      tanaman_id INT NOT NULL,
+      user_id INT NOT NULL,
+      tipe_aksi ENUM('siram', 'pupuk', 'panen') NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tanaman_id) REFERENCES tanaman(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `;
+  db.query(createRiwayatPerawatanQuery, (err) => {
+    if (err) console.error("❌ Gagal membuat tabel riwayat_perawatan:", err);
+    else console.log("✅ Tabel 'riwayat_perawatan' siap digunakan.");
   });
 });
 
@@ -889,27 +936,121 @@ app.delete('/api/appointments/:id', (req, res) => {
 });
 
 // ==========================================
-// API AUTENTIKASI (LOGIN ADMIN)
+// API AUTENTIKASI
 // ==========================================
+app.post('/api/register', async (req, res) => {
+  const { nama_lengkap, username, password, role } = req.body;
+  if (!nama_lengkap || !username || !password || !role) {
+    return res.status(400).json({ message: "Semua field harus diisi!" });
+  }
+
+  try {
+    db.query("SELECT * FROM users WHERE username = ?", [username], async (err, results) => {
+      if (err) return res.status(500).json({ message: "Terjadi kesalahan server saat cek username." });
+      
+      if (results.length > 0) {
+        return res.status(400).json({ message: "Username sudah digunakan." });
+      }
+
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+
+      const sql = "INSERT INTO users (nama_lengkap, username, password, role, status) VALUES (?, ?, ?, ?, 'pending')";
+      db.query(sql, [nama_lengkap, username, hashedPassword, role], (err, insertResult) => {
+        if (err) return res.status(500).json({ message: "Gagal register", error: err.message });
+        res.status(201).json({ message: "Registrasi Berhasil. Menunggu persetujuan Admin." });
+      });
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Terjadi kesalahan server." });
+  }
+});
+
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   
-  db.query("SELECT * FROM admin_users WHERE username = ?", [username], async (err, results) => {
+  // Coba cek di tabel users
+  db.query("SELECT * FROM users WHERE username = ?", [username], async (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     
-    if (results.length === 0) {
-      return res.status(401).json({ error: "Username tidak ditemukan!" });
+    if (results.length > 0) {
+      const user = results[0];
+      
+      if (user.status !== 'approved') {
+        return res.status(403).json({ error: "Akun Anda belum disetujui oleh Admin. Harap tunggu konfirmasi." });
+      }
+      
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) return res.status(401).json({ error: "Password salah!" });
+      
+      const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '1d' });
+      return res.json({ 
+        message: "Login berhasil", 
+        token,
+        user: { id: user.id, nama_lengkap: user.nama_lengkap, role: user.role }
+      });
     }
     
-    const user = results[0];
-    const isMatch = await bcrypt.compare(password, user.password);
-    
-    if (!isMatch) {
-      return res.status(401).json({ error: "Password salah!" });
-    }
-    
-    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1d' });
-    res.json({ message: "Login berhasil", token });
+    // Jika tidak ada di users, cek di admin_users
+    db.query("SELECT * FROM admin_users WHERE username = ?", [username], async (errAdmin, resultsAdmin) => {
+      if (errAdmin) return res.status(500).json({ error: errAdmin.message });
+      
+      if (resultsAdmin.length === 0) {
+        return res.status(401).json({ error: "Username tidak ditemukan!" });
+      }
+      
+      const admin = resultsAdmin[0];
+      const isMatch = await bcrypt.compare(password, admin.password);
+      
+      if (!isMatch) {
+        return res.status(401).json({ error: "Password salah!" });
+      }
+      
+      const token = jwt.sign({ id: admin.id, username: admin.username, role: 'admin' }, JWT_SECRET, { expiresIn: '1d' });
+      res.json({ 
+        message: "Login admin berhasil", 
+        token,
+        user: { id: admin.id, nama_lengkap: 'Administrator', role: 'admin' }
+      });
+    });
+  });
+});
+
+// Auth Middleware
+const authenticateUserToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) return res.status(401).json({ message: "Akses ditolak. Belum login." });
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ message: "Token tidak valid atau sudah kadaluarsa." });
+    req.user = user;
+    next();
+  });
+};
+
+// ==========================================
+// API ADMIN - MANAJEMEN USER (APPROVAL)
+// ==========================================
+app.get('/api/admin/users', (req, res) => {
+  db.query("SELECT id, nama_lengkap, username, role, status, created_at FROM users ORDER BY created_at DESC", (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(results);
+  });
+});
+
+app.put('/api/admin/users/:id/approve', (req, res) => {
+  db.query("UPDATE users SET status = 'approved' WHERE id = ?", [req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "User berhasil disetujui" });
+  });
+});
+
+app.delete('/api/admin/users/:id/reject', (req, res) => {
+  db.query("DELETE FROM users WHERE id = ?", [req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "User berhasil ditolak & dihapus" });
   });
 });
 
@@ -945,23 +1086,23 @@ app.get('/api/tanaman/:id', (req, res) => {
 });
 
 app.post('/api/tanaman', upload.single('gambar'), (req, res) => {
-  const { nama, jenis, lokasi, deskripsi, kondisi, usia, jadwal_siram, penanggung_jawab, kebutuhan_air, terakhir_dipupuk } = req.body;
+  const { nama, jenis, lokasi, deskripsi, kondisi, usia, jadwal_siram, jadwal_pupuk, jadwal_panen, penanggung_jawab, kebutuhan_air, terakhir_dipupuk } = req.body;
   const gambar = req.file ? req.file.filename : null;
-  db.query("INSERT INTO tanaman (nama, jenis, lokasi, deskripsi, kondisi, gambar, usia, jadwal_siram, penanggung_jawab, kebutuhan_air, terakhir_dipupuk) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [nama, jenis, lokasi, deskripsi, kondisi || 'Sehat', gambar, usia, jadwal_siram, penanggung_jawab, kebutuhan_air, terakhir_dipupuk], (err, results) => {
+  db.query("INSERT INTO tanaman (nama, jenis, lokasi, deskripsi, kondisi, gambar, usia, jadwal_siram, jadwal_pupuk, jadwal_panen, penanggung_jawab, kebutuhan_air, terakhir_dipupuk) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [nama, jenis, lokasi, deskripsi, kondisi || 'Sehat', gambar, usia, jadwal_siram, jadwal_pupuk, jadwal_panen, penanggung_jawab, kebutuhan_air, terakhir_dipupuk], (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: "Berhasil", id: results.insertId });
   });
 });
 
 app.put('/api/tanaman/:id', upload.single('gambar'), (req, res) => {
-  const { nama, jenis, lokasi, deskripsi, kondisi, usia, jadwal_siram, penanggung_jawab, kebutuhan_air, terakhir_dipupuk } = req.body;
+  const { nama, jenis, lokasi, deskripsi, kondisi, usia, jadwal_siram, jadwal_pupuk, jadwal_panen, penanggung_jawab, kebutuhan_air, terakhir_dipupuk } = req.body;
   if (req.file) {
-    db.query("UPDATE tanaman SET nama=?, jenis=?, lokasi=?, deskripsi=?, kondisi=?, gambar=?, usia=?, jadwal_siram=?, penanggung_jawab=?, kebutuhan_air=?, terakhir_dipupuk=? WHERE id=?", [nama, jenis, lokasi, deskripsi, kondisi || 'Sehat', req.file.filename, usia, jadwal_siram, penanggung_jawab, kebutuhan_air, terakhir_dipupuk, req.params.id], (err) => {
+    db.query("UPDATE tanaman SET nama=?, jenis=?, lokasi=?, deskripsi=?, kondisi=?, gambar=?, usia=?, jadwal_siram=?, jadwal_pupuk=?, jadwal_panen=?, penanggung_jawab=?, kebutuhan_air=?, terakhir_dipupuk=? WHERE id=?", [nama, jenis, lokasi, deskripsi, kondisi || 'Sehat', req.file.filename, usia, jadwal_siram, jadwal_pupuk, jadwal_panen, penanggung_jawab, kebutuhan_air, terakhir_dipupuk, req.params.id], (err) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ message: "Berhasil" });
     });
   } else {
-    db.query("UPDATE tanaman SET nama=?, jenis=?, lokasi=?, deskripsi=?, kondisi=?, usia=?, jadwal_siram=?, penanggung_jawab=?, kebutuhan_air=?, terakhir_dipupuk=? WHERE id=?", [nama, jenis, lokasi, deskripsi, kondisi || 'Sehat', usia, jadwal_siram, penanggung_jawab, kebutuhan_air, terakhir_dipupuk, req.params.id], (err) => {
+    db.query("UPDATE tanaman SET nama=?, jenis=?, lokasi=?, deskripsi=?, kondisi=?, usia=?, jadwal_siram=?, jadwal_pupuk=?, jadwal_panen=?, penanggung_jawab=?, kebutuhan_air=?, terakhir_dipupuk=? WHERE id=?", [nama, jenis, lokasi, deskripsi, kondisi || 'Sehat', usia, jadwal_siram, jadwal_pupuk, jadwal_panen, penanggung_jawab, kebutuhan_air, terakhir_dipupuk, req.params.id], (err) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ message: "Berhasil" });
     });
@@ -982,21 +1123,26 @@ app.get('/api/log_perawatan', (req, res) => {
   const { tanaman_id } = req.query;
   let query = `
     SELECT 
-      l.id, l.tanaman_id, l.jenis_tindakan, l.waktu_tindakan, l.gambar,
+      r.id, 
+      r.tanaman_id, 
+      r.tipe_aksi AS jenis_tindakan, 
+      r.created_at AS waktu_tindakan, 
+      NULL AS gambar,
       t.nama AS nama_tanaman, 
-      l.nama_perawat AS nama_santri, 
-      l.role_perawat 
-    FROM log_perawatan l 
-    JOIN tanaman t ON l.tanaman_id = t.id
+      u.nama_lengkap AS nama_santri, 
+      u.role AS role_perawat 
+    FROM riwayat_perawatan r 
+    JOIN tanaman t ON r.tanaman_id = t.id
+    JOIN users u ON r.user_id = u.id
   `;
   const params = [];
   
   if (tanaman_id) {
-    query += ` WHERE l.tanaman_id = ? `;
+    query += ` WHERE r.tanaman_id = ? `;
     params.push(tanaman_id);
   }
   
-  query += ` ORDER BY l.waktu_tindakan DESC `;
+  query += ` ORDER BY r.created_at DESC `;
   
   db.query(query, params, (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -1049,6 +1195,40 @@ app.post('/api/foto_perkembangan', authenticateSantriToken, upload.single('gamba
   db.query("INSERT INTO foto_perkembangan (tanaman_id, santri_id, petani_id, gambar) VALUES (?, ?, ?, ?)", [tanaman_id, santri_id, petani_id, gambar], (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: "Foto perkembangan berhasil diunggah", id: results.insertId, gambar });
+  });
+});
+
+// ==========================================
+// API RIWAYAT PERAWATAN
+// ==========================================
+app.post('/api/tanaman/:id/aksi', authenticateUserToken, (req, res) => {
+  const { tipe_aksi } = req.body;
+  const tanaman_id = req.params.id;
+  const user_id = req.user.id;
+
+  if (!['siram', 'pupuk', 'panen'].includes(tipe_aksi)) {
+    return res.status(400).json({ error: "tipe_aksi tidak valid" });
+  }
+
+  const query = "INSERT INTO riwayat_perawatan (tanaman_id, user_id, tipe_aksi) VALUES (?, ?, ?)";
+  db.query(query, [tanaman_id, user_id, tipe_aksi], (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Aksi perawatan berhasil dicatat", id: results.insertId });
+  });
+});
+
+app.get('/api/tanaman/:id/riwayat', (req, res) => {
+  const tanaman_id = req.params.id;
+  const query = `
+    SELECT r.id, r.tipe_aksi, u.nama_lengkap, u.role, r.created_at
+    FROM riwayat_perawatan r
+    JOIN users u ON r.user_id = u.id
+    WHERE r.tanaman_id = ?
+    ORDER BY r.created_at DESC
+  `;
+  db.query(query, [tanaman_id], (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(results);
   });
 });
 

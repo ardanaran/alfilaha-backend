@@ -1,0 +1,23 @@
+
+> backend@1.0.0 start
+> node server.js
+
+◇ injected env (6) from .env // tip: ⌘ override existing { override: true }
+🚀 Server Backend berjalan di http://localhost:5000
+✅ Berhasil terhubung ke MySQL (db_alfilaha)
+✅ Tabel 'reservasi' siap digunakan.
+✅ Tabel 'paket_wisata' siap digunakan.
+✅ Tabel 'events' siap digunakan.
+✅ Tabel 'blogs' siap digunakan.
+✅ Tabel 'appointments' siap digunakan.
+✅ Tabel 'admin_users' siap digunakan.
+✅ Tabel 'galeri' siap digunakan.
+✅ Tabel 'layanan' siap digunakan.
+✅ Tabel 'pendaftar_santri' siap digunakan.
+✅ Tabel 'program_pendaftaran' siap digunakan.
+✅ Tabel 'tanaman' siap digunakan.
+✅ Tabel 'log_perawatan' siap digunakan.
+✅ Tabel 'foto_perkembangan' siap digunakan.
+Info kolom tanaman:  You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'VARCHAR(100),
+      jadwal_panen VARCHAR(100),
+        ADD COLUMN IF NOT EXIS...' at line 6
