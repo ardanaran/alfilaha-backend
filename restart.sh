@@ -6,6 +6,6 @@ pkill -f "node server-update.js" 2>/dev/null
 sleep 1
 
 echo "✅ Proses lama dihentikan"
-echo "🚀 Memulai server baru..."
-cd ~/alfilaha-backend
-node server.js
+echo "🚀 Memulai backend canonical (server-update.cjs)..."
+cd /home/fauzan/alfilaha-react || exit 1
+exec node server-update.cjs

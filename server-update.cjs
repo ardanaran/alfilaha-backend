@@ -1239,7 +1239,7 @@ app.get('/api/tugas/hari-ini', authenticateSantriToken, (req, res) => {
     SELECT t.*, s.nama_aktivitas, s.kategori, s.deskripsi
     FROM activity_tasks t
     JOIN activity_schedules s ON t.schedule_id = s.id
-    WHERE t.santri_id = ? AND t.tanggal_tugas = ?
+    WHERE t.santri_id = ? AND t.tanggal_tugas = ? AND t.status = 'pending'
     ORDER BY t.id ASC
   `;
   db.query(q, [santriId, todayStr], (err, results) => {
