@@ -3793,7 +3793,7 @@ app.put('/api/admin/users/:id/approve', authenticateAdminToken, async (req, res,
   }
 });
 
-app.delete('/api/admin/users/:id/reject', authenticateAdminToken, async (req, res, next) => {
+const handleRejectUser = async (req, res, next) => {
   try {
     const id = parsePositiveId(req.params.id);
     if (!id) return res.status(400).json({ error: 'ID user tidak valid.' });
@@ -3803,7 +3803,10 @@ app.delete('/api/admin/users/:id/reject', authenticateAdminToken, async (req, re
   } catch (error) {
     return next(error);
   }
-});
+};
+
+app.delete('/api/admin/users/:id/reject', authenticateAdminToken, handleRejectUser);
+app.put('/api/admin/users/:id/reject', authenticateAdminToken, handleRejectUser);
 
 // TAHUN AJARAN (CRUD sederhana)
 app.get('/api/admin/tahun-ajaran', authenticateAdminToken, async (req, res, next) => {
@@ -6147,8 +6150,7 @@ app.post('/api/tugas', authenticateAdminToken, (req, res) => {
   );
 });
 
-// PATCH tandai selesai — santri upload foto opsional
-app.patch('/api/tugas/:id/selesai', authenticateSantriToken, uploadTugas.single('foto_bukti'), (req, res) => {
+const handleTugasSelesaiSantri = (req, res) => {
   const santriId  = req.user.id;
   const {
     catatan,
@@ -6372,7 +6374,11 @@ app.patch('/api/tugas/:id/selesai', authenticateSantriToken, uploadTugas.single(
       }
     );
   });
-});
+};
+// PATCH tandai selesai — santri upload foto opsional (canonical)
+app.patch('/api/tugas/:id/selesai', authenticateSantriToken, uploadTugas.single('foto_bukti'), handleTugasSelesaiSantri);
+// PUT alias untuk kompatibilitas frontend lama
+app.put('/api/tugas/:id/selesai', authenticateSantriToken, uploadTugas.single('foto_bukti'), handleTugasSelesaiSantri);
 
 // PATCH status tiket oleh admin
 app.patch('/api/tugas/:id/status', authenticateAdminToken, (req, res) => {
