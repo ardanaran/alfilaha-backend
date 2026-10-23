@@ -4796,7 +4796,7 @@ app.post("/api/jadwal/:id/regenerate", (req, res) => {
 const PORT = process.env.PORT || 5000;
 
 const canonicalBackend = require(
-  path.resolve(__dirname, "../alfilaha-react/server-update.cjs"),
+  path.resolve(__dirname, "./server-update.cjs"),
 );
 app.use(canonicalBackend.app);
 
