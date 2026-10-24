@@ -6452,7 +6452,9 @@ async function startServer() {
   } catch (error) {
     console.error(`❌ Server tidak dimulai: ${error.message}`);
     process.exitCode = 1;
-    db.destroy();
+    db.end((endError) => {
+      if (endError) console.error('❌ Gagal menutup pool database:', endError.message);
+    });
   }
 }
 
@@ -6461,8 +6463,13 @@ function shutdownServer() {
   shuttingDown = true;
   stopCron();
   const finish = () => {
-    if (db && !db._closing) db.end(() => process.exit(0));
-    else process.exit(0);
+    db.end((error) => {
+      if (error) {
+        console.error('❌ Gagal menutup pool database:', error.message);
+        process.exit(1);
+      }
+      process.exit(0);
+    });
   };
   if (server) server.close(finish);
   else finish();

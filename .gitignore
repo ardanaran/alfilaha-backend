@@ -3,6 +3,10 @@
 # Dependencies
 node_modules/
 
+# Runtime uploads (keep the directory placeholder, not uploaded files)
+uploads/*
+!uploads/.gitkeep
+
 # Environment variables
 .env
 .env.*
@@ -15,6 +19,7 @@ node_modules/
 # Logs
 logs/
 *.log
+backend_log.txt
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
